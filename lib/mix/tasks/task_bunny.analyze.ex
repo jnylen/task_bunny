@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Analyze do
+defmodule Mix.Tasks.TaskBunny.Analyze do
   # Analyze the code and exit if errors have been found.
   #
   # It is a private mix task for TaskBunny.
