@@ -174,7 +174,12 @@ defmodule TaskBunny.Worker do
 
     case succeeded?(result) do
       true ->
+        # Ack
         Consumer.ack(state.channel, meta, true)
+
+        # Remove queue key
+        {:ok, decoded} = Message.decode(body)
+        remove_queue_key(decoded["job"], decoded["payload"])
 
         {:noreply, update_job_stats(state, :succeeded)}
 
@@ -249,6 +254,7 @@ defmodule TaskBunny.Worker do
     if reject?(job, failed_count, job_error) do
       reject_message(state, new_body, meta)
       reject_callback(job, new_body)
+      remove_queue_key(job, decoded["payload"])
       {:noreply, update_job_stats(state, :rejected)}
     else
       retry_message(job, state, new_body, meta, failed_count)
@@ -297,6 +303,15 @@ defmodule TaskBunny.Worker do
       "#{message} #{inspect(additional)}"
     else
       message
+    end
+  end
+
+  # If it has a queue key, then remove it if it finished okay.
+  # Otherwise remove it when the retries fails completely
+  @spec remove_queue_key(atom, any) :: :ok | nil
+  defp remove_queue_key(job, payload) do
+    if job.queue_key(payload) != nil do
+      Partition.remove_queued(job.queue_key(payload))
     end
   end
 end

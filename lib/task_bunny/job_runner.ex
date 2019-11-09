@@ -22,7 +22,7 @@ defmodule TaskBunny.JobRunner do
   @moduledoc false
 
   require Logger
-  alias TaskBunny.JobError
+  alias TaskBunny.{JobError, Partition}
 
   @doc ~S"""
   Invokes the given job with the given payload.
@@ -57,9 +57,14 @@ defmodule TaskBunny.JobRunner do
   @spec run_job(atom, any) :: :ok | {:ok, any} | {:error, any}
   defp run_job(job, payload) do
     case job.perform(payload) do
-      :ok -> :ok
-      {:ok, something} -> {:ok, something}
-      error -> {:error, JobError.handle_return_value(job, payload, error)}
+      :ok ->
+        :ok
+
+      {:ok, something} ->
+        {:ok, something}
+
+      error ->
+        {:error, JobError.handle_return_value(job, payload, error)}
     end
   rescue
     error ->

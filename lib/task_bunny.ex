@@ -15,6 +15,8 @@ defmodule TaskBunny do
 
     # Define workers and child supervisors to be supervised
     children = [
+      TaskBunny.Partition.KeySet,
+      TaskBunny.Partition,
       supervisor(TaskBunny.Supervisor, [])
     ]
 
