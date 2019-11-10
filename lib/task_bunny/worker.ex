@@ -18,7 +18,8 @@ defmodule TaskBunny.Worker do
     Publisher,
     Worker,
     Message,
-    FailureBackend
+    FailureBackend,
+    Partition
   }
 
   @typedoc """
