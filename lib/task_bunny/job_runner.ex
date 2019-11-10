@@ -58,7 +58,7 @@ defmodule TaskBunny.JobRunner do
   defp run_job(job, payload) do
     # Only run if it's not executing already, otherwise enqueue it again wiht a delay
     if job.execution_key(payload) != nil and Partition.executing?(job.queue_key(payload), :add) do
-      job.enqueue(payload, delay: 600_000)
+      job.enqueue(payload, delay: 60000)
 
       :ok
     else

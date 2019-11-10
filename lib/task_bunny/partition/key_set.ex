@@ -60,7 +60,7 @@ defmodule TaskBunny.Partition.KeySet do
   use GenServer
 
   def start_link(opts \\ []) do
-    GenServer.start(__MODULE__, [opts])
+    GenServer.start(__MODULE__, [opts], name: __MODULE__)
   end
 
   def add(pid, key) do
