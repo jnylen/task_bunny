@@ -1,13 +1,27 @@
 defmodule TaskBunny.JobTest do
   use ExUnit.Case
   import TaskBunny.QueueTestHelper
-  alias TaskBunny.{Job, Queue, Message, QueueTestHelper}
+  alias TaskBunny.{Job, Queue, Message, QueueTestHelper, Partition}
 
   @queue "task_bunny.job_test"
 
   defmodule TestJob do
     use Job
     def perform(_payload), do: :ok
+  end
+
+  defmodule TestJob2 do
+    use Job
+
+    def queue_key(payload) do
+      payload
+      |> Map.values()
+      |> Enum.join("_")
+    end
+
+    def perform(_payload) do
+      Process.sleep(1_000)
+    end
   end
 
   setup do
@@ -36,6 +50,18 @@ defmodule TaskBunny.JobTest do
                  queue: @queue,
                  host: :invalid_host
                )
+    end
+
+    test "fails to enqueue job with duplicate queue key" do
+      payload = %{"foo" => "bar"}
+      :ok = TestJob2.enqueue(payload, queue: @queue)
+      assert {:error, :duplicate} == TestJob2.enqueue(payload, queue: @queue)
+    end
+
+    test "make sure the queue key was removed after job was processed" do
+      Process.sleep(2_000)
+
+      assert false == TestJob2.queue_key(%{"foo" => "bar"}) |> Partition.queued?()
     end
   end
 

@@ -88,6 +88,28 @@ defmodule TaskBunny.Job do
   @callback perform(any) :: :ok | {:ok, any} | {:error, term}
 
   @doc """
+  Enforces job uniqueness.
+
+  When returning a string from this function,
+  TaskBunny enforces that only one job per queue key
+  can be put in the queue at the same time. Only when the job has left
+  the queue (after it has been executed), it will be possible to
+  enqueue a job with the same queue key again.
+  """
+  @callback queue_key(any) :: nil | String.t()
+
+  @doc """
+  Enforces job execution serialization.
+
+  When returning a string from this function, TaskBunny enforces that not more
+  than one job with the same job is executed concurrently. However, it
+  is still possible to have multiple jobs with the same execution key
+  enqueued, but jobs that have the same execution key will be put in a
+  waiting queue and processed serially.
+  """
+  @callback execution_key(any) :: nil | String.t()
+
+  @doc """
   Callback executed when a process gets rejected.
 
   It receives in input the whole error trace structure plus the orginal payload for inspection and recovery actions.
@@ -122,7 +144,7 @@ defmodule TaskBunny.Job do
   @callback retry_interval(integer) :: integer
 
   require Logger
-  alias TaskBunny.{Config, Queue, Job, Message, Publisher}
+  alias TaskBunny.{Config, Queue, Job, Message, Partition, Publisher}
 
   alias TaskBunny.{
     Publisher.PublishError,
@@ -136,15 +158,26 @@ defmodule TaskBunny.Job do
 
       @doc false
       @spec enqueue(any, keyword) :: :ok | {:error, any}
-      def enqueue(payload, options \\ []) do
+      def enqueue(payload \\ %{}, options \\ []) do
         TaskBunny.Job.enqueue(__MODULE__, payload, options)
       end
 
       @doc false
       @spec enqueue!(any, keyword) :: :ok
-      def enqueue!(payload, options \\ []) do
+      def enqueue!(payload \\ %{}, options \\ []) do
         TaskBunny.Job.enqueue!(__MODULE__, payload, options)
       end
+
+      # Makes sure that the queue only includes a unique job.
+      @doc false
+      @spec queue_key(any) :: nil | String.t()
+      def queue_key(_payload), do: nil
+
+      # Makes sure that only one with the same key is
+      # being executed at the same time.
+      @doc false
+      @spec execution_key(any) :: nil | String.t()
+      def execution_key(_payload), do: nil
 
       # Returns timeout (default 2 minutes).
       # Override the method to change the timeout.
@@ -166,7 +199,12 @@ defmodule TaskBunny.Job do
       @spec on_reject(any) :: :ok
       def on_reject(_body), do: :ok
 
-      defoverridable timeout: 0, max_retry: 0, retry_interval: 1, on_reject: 1
+      defoverridable timeout: 0,
+                     max_retry: 0,
+                     retry_interval: 1,
+                     on_reject: 1,
+                     queue_key: 1,
+                     execution_key: 1
     end
   end
 
@@ -199,13 +237,21 @@ defmodule TaskBunny.Job do
   @spec enqueue!(atom, any, keyword) :: :ok
   def enqueue!(job, payload, options \\ []) do
     queue_data = Config.queue_for_job(job) || []
-
     host = options[:host] || queue_data[:host] || :default
-    {:ok, message} = Message.encode(job, payload)
 
-    case options[:queue] || queue_data[:name] do
-      nil -> raise QueueNotFoundError, job: job
-      queue -> do_enqueue(host, queue, message, options[:delay])
+    # Check the queue key; when there is a queue key and it is not
+    # queued, immediately add it to the queue key set to prevent
+    # races.
+
+    if job.queue_key(payload) != nil and Partition.queued?(job.queue_key(payload), :add) do
+      {:error, :duplicate}
+    else
+      {:ok, message} = Message.encode(job, payload)
+
+      case options[:queue] || queue_data[:name] do
+        nil -> raise QueueNotFoundError, job: job
+        queue -> do_enqueue(host, queue, message, options[:delay])
+      end
     end
   end
 

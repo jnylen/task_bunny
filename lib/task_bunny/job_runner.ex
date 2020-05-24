@@ -22,7 +22,7 @@ defmodule TaskBunny.JobRunner do
   @moduledoc false
 
   require Logger
-  alias TaskBunny.JobError
+  alias TaskBunny.{JobError, Partition}
 
   @doc ~S"""
   Invokes the given job with the given payload.
@@ -56,17 +56,39 @@ defmodule TaskBunny.JobRunner do
   # Any raises or throws in the perform are caught and turned into an :error tuple.
   @spec run_job(atom, any) :: :ok | {:ok, any} | {:error, any}
   defp run_job(job, payload) do
-    case job.perform(payload) do
-      :ok -> :ok
-      {:ok, something} -> {:ok, something}
-      error -> {:error, JobError.handle_return_value(job, payload, error)}
+    # Only run if it's not executing already, otherwise enqueue it again wiht a delay
+    if job.execution_key(payload) != nil and Partition.executing?(job.execution_key(payload), :add) do
+      job.enqueue(payload, delay: 60000)
+
+      :ok
+    else
+      case job.perform(payload) do
+        :ok ->
+          Partition.remove_executed(job.execution_key(payload))
+
+          :ok
+
+        {:ok, something} ->
+          Partition.remove_executed(job.execution_key(payload))
+
+          {:ok, something}
+
+        error ->
+          Partition.remove_executed(job.execution_key(payload))
+
+          {:error, JobError.handle_return_value(job, payload, error)}
+      end
     end
   rescue
     error ->
+      Partition.remove_executed(job.execution_key(payload))
+
       Logger.debug("TaskBunny.JobRunner - Runner rescued #{inspect(error)}")
       {:error, JobError.handle_exception(job, payload, error)}
   catch
     _, reason ->
+      Partition.remove_executed(job.execution_key(payload))
+
       Logger.debug("TaskBunny.JobRunner - Runner caught reason: #{inspect(reason)}")
       {:error, JobError.handle_exit(job, payload, reason)}
   end
